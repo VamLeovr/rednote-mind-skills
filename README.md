@@ -79,13 +79,16 @@ Claude自动调用MCP工具：
   - Base64编码输出，直接供Claude Vision分析
   - 支持批量下载（论文截图、图表、配方图）
 
-#### 🤖 VLM 预分析（可选）
-- 使用 Claude API 预分析图片内容
+#### 🤖 VLM 图片分析（可选）
+- 使用智增增 API (Qwen VL) 分析图片内容
   - 自动提取图片中的文字（OCR）
   - 生成结构化描述（对象、场景、类型）
   - 适合大量文字截图的快速提取
-  - 需设置 `ANTHROPIC_API_KEY` 环境变量启用
-  - 成本：约 $0.027/张图片
+  - **用户可选模式**：
+    - `imageMode: 'original'`（默认）- 返回压缩后的原始图片 Base64
+    - `imageMode: 'vlm'` - 使用 VLM 分析并返回文字描述
+  - 需设置 `ZZZ_API_KEY` 环境变量启用 VLM 模式
+  - 成本：约 ¥0.003/张图片（较 Claude API 节省 90%）
 
 ### 🌟 核心优势
 
@@ -120,6 +123,36 @@ rednote-mind-mcp init
 3. 你扫码或密码登录（60秒内完成）
 4. 自动保存cookies到`~/.mcp/rednote/cookies.json`
 5. 自动提取用户ID并保存到`~/.mcp/rednote/config.json`
+
+### 可选：配置 VLM 功能
+
+如需启用智能图片分析（当图片总量超过 900KB 时自动触发），需要配置智增增 API：
+
+1. **获取 API Key**：访问 [智增增官网](https://zhizengzeng.com) 注册并获取 API Key
+
+2. **设置环境变量**：
+
+   **macOS/Linux**：
+   ```bash
+   # 在 ~/.zshrc 或 ~/.bashrc 中添加
+   export ZZZ_API_KEY="your_api_key_here"
+
+   # 重新加载配置
+   source ~/.zshrc  # 或 source ~/.bashrc
+   ```
+
+   **Windows**：
+   ```cmd
+   # 在系统环境变量中添加
+   setx ZZZ_API_KEY "your_api_key_here"
+   ```
+
+3. **重启 MCP 客户端**：重启 Claude Desktop 或其他客户端使环境变量生效
+
+**VLM 功能说明**：
+- 当 `get_note_content` 返回的图片总量超过 900KB 时，自动使用 VLM 分析超出部分
+- 无需手动配置，自动触发
+- 分析结果以文本形式返回，包含图片中的文字和结构化描述
 
 ### 配置MCP客户端
 
@@ -325,7 +358,50 @@ rednote-mind-mcp init
 
 ---
 
-### 示例3：自定义图片压缩质量
+### 示例3：使用 VLM 分析图片文字
+
+**场景：**论文笔记包含大量公式和表格截图，希望直接提取文字内容而非查看图片。
+
+**在Claude Desktop中发送：**
+
+```
+获取笔记 https://www.xiaohongshu.com/explore/xxx?xsec_token=...，
+使用 VLM 模式分析图片中的文字和内容，不要返回原图。
+```
+
+**Claude 会调用：**
+```json
+{
+  "noteUrl": "https://www.xiaohongshu.com/explore/xxx?xsec_token=...",
+  "imageMode": "vlm"
+}
+```
+
+**返回结果示例：**
+```markdown
+## 🔍 VLM 图片分析结果
+
+共分析 3 张图片：
+
+### 图片 1
+这张图片展示了一个深度学习模型的架构图，包含输入层、多个隐藏层和输出层。
+
+**提取的文字内容**:
+Input Layer → Hidden Layer 1 (256 units) → Hidden Layer 2 (128 units) → Output Layer
+
+**检测到的元素**: 流程图, 神经网络架构, 箭头, 文本标注
+
+### 图片 2
+包含数学公式的截图，主要是损失函数的定义。
+
+**提取的文字内容**:
+Loss = ∑(y_pred - y_true)²
+...
+```
+
+---
+
+### 示例4：自定义图片压缩质量
 
 **高质量图片（文字截图）：**
 

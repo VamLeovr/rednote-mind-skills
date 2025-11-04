@@ -37,12 +37,13 @@ export interface CompressionResult {
 }
 
 /**
- * 默认压缩配置
+ * 默认压缩配置（针对 MCP 1MB 限制优化）
+ * 调整后 3 张图片总大小约 450KB，安全通过 MCP 传输
  */
 export const DEFAULT_COMPRESSION_OPTIONS: CompressionOptions = {
-  maxWidth: 1920,
-  maxHeight: 1920,
-  quality: 75,
+  maxWidth: 1600,
+  maxHeight: 1600,
+  quality: 65,
   format: 'jpeg'
 };
 

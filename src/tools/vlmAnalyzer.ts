@@ -1,32 +1,23 @@
 /**
  * VLM (Vision Language Model) 图片分析模块
- * 使用 Claude API 预分析图片内容，提取文字和结构化描述
- * 这是一个可选功能，需要设置 ANTHROPIC_API_KEY 环境变量
+ * 使用智增增 API (Qwen VL) 预分析图片内容，提取文字和结构化描述
+ * 这是一个可选功能，需要设置 ZZZ_API_KEY 环境变量
  */
 
-import Anthropic from '@anthropic-ai/sdk';
-import { logger } from './logger.js';
-import type { VLMAnalysisResult, ImageData } from '../types.js';
+import { logger } from './logger';
+import type { VLMAnalysisResult, ImageData } from '../types';
+
+/**
+ * 智增增 API 配置
+ */
+const ZZZ_API_URL = 'https://api.zhizengzeng.com/v1/chat/completions';
+const ZZZ_VLM_MODEL = 'qwen3-vl-235b-a22b-thinking';
 
 /**
  * 检查 VLM 功能是否可用
  */
 export function isVLMAvailable(): boolean {
-  return !!process.env.ANTHROPIC_API_KEY;
-}
-
-/**
- * 获取 Anthropic 客户端实例
- */
-function getAnthropicClient(): Anthropic | null {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    logger.warn('ANTHROPIC_API_KEY 未设置，VLM 功能不可用');
-    return null;
-  }
-
-  return new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY
-  });
+  return !!process.env.ZZZ_API_KEY;
 }
 
 /**
@@ -39,13 +30,12 @@ function getAnthropicClient(): Anthropic | null {
  */
 export async function analyzeImageWithVLM(
   imageBase64: string,
-  mimeType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' = 'image/jpeg',
+  mimeType: string = 'image/jpeg',
   customPrompt?: string
 ): Promise<VLMAnalysisResult> {
-  const client = getAnthropicClient();
 
-  if (!client) {
-    throw new Error('VLM 功能不可用：请设置 ANTHROPIC_API_KEY 环境变量');
+  if (!process.env.ZZZ_API_KEY) {
+    throw new Error('VLM 功能不可用：请设置 ZZZ_API_KEY 环境变量');
   }
 
   // 默认提示词：提取文字和描述图片内容
@@ -61,21 +51,19 @@ export async function analyzeImageWithVLM(
   const prompt = customPrompt || defaultPrompt;
 
   try {
-    logger.debug('🔍 使用 Claude VLM 分析图片...');
+    logger.debug(`🔍 使用智增增 VLM (${ZZZ_VLM_MODEL}) 分析图片...`);
 
-    const response = await client.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
-      max_tokens: 1024,
+    // 构建符合 OpenAI vision 格式的请求
+    const requestBody = {
+      model: ZZZ_VLM_MODEL,
       messages: [
         {
           role: 'user',
           content: [
             {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: mimeType,
-                data: imageBase64
+              type: 'image_url',
+              image_url: {
+                url: `data:${mimeType};base64,${imageBase64}`
               }
             },
             {
@@ -84,23 +72,58 @@ export async function analyzeImageWithVLM(
             }
           ]
         }
-      ]
+      ],
+      max_tokens: 1024
+    };
+
+    // 调用智增增 API
+    logger.debug(`调用 API: ${ZZZ_API_URL}`);
+    logger.debug(`请求体大小: ${JSON.stringify(requestBody).length} 字节`);
+
+    const response = await fetch(ZZZ_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.ZZZ_API_KEY}`
+      },
+      body: JSON.stringify(requestBody)
     });
 
-    // 提取响应文本
-    const responseText = response.content
-      .filter(block => block.type === 'text')
-      .map(block => block.type === 'text' ? block.text : '')
-      .join('\n');
+    logger.debug(`响应状态: ${response.status} ${response.statusText}`);
 
-    logger.debug(`✅ VLM 分析完成 (${response.usage.input_tokens} 输入 tokens, ${response.usage.output_tokens} 输出 tokens)`);
+    const data = await response.json();
+
+    // 调试：打印完整响应
+    logger.debug('智增增 API 原始响应:', JSON.stringify(data, null, 2));
+
+    // 检查 API 错误
+    if (data.error) {
+      const errorMsg = data.error.message || JSON.stringify(data.error);
+      logger.error('智增增 API 错误:', errorMsg);
+      throw new Error(`智增增 API 错误: ${errorMsg}`);
+    }
+
+    // 检查 HTTP 状态
+    if (!response.ok) {
+      throw new Error(`智增增 API 调用失败: ${response.status} ${JSON.stringify(data)}`);
+    }
+
+    // 提取响应文本
+    const responseText = data.choices?.[0]?.message?.content || '';
+
+    if (!responseText) {
+      logger.error('VLM 响应结构异常:', JSON.stringify(data, null, 2));
+      throw new Error('VLM 返回空响应，响应结构: ' + JSON.stringify(data));
+    }
+
+    logger.debug(`✅ VLM 分析完成 (使用 tokens: ${data.usage?.total_tokens || 'N/A'})`);
 
     // 解析结果
     const hasText = responseText.toLowerCase().includes('文字') ||
                     responseText.toLowerCase().includes('text') ||
-                    /包含|存在|有文字/.test(responseText);
+                    /包含|存在|有.*文字/.test(responseText);
 
-    // 简单提取文本内容（实际项目中可以使用更复杂的解析）
+    // 简单提取文本内容
     const textContent = extractTextFromVLMResponse(responseText);
     const detectedObjects = extractObjectsFromVLMResponse(responseText);
 
@@ -109,11 +132,18 @@ export async function analyzeImageWithVLM(
       textContent,
       description: responseText,
       detectedObjects,
-      confidence: 0.85  // Claude 模型一般置信度很高
+      confidence: 0.85
     };
 
   } catch (error: any) {
     logger.error(`VLM 分析失败: ${error.message}`);
+    logger.error(`错误详情: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`);
+
+    // 提供更友好的错误提示
+    if (error.message.includes('fetch failed')) {
+      throw new Error(`VLM API 调用失败 (网络错误): ${error.message}. 请检查: 1) 网络连接, 2) API 端点是否正确, 3) 是否需要代理`);
+    }
+
     throw new Error(`VLM 分析失败: ${error.message}`);
   }
 }
@@ -140,10 +170,7 @@ export async function analyzeImages(
     try {
       logger.debug(`分析第 ${i + 1}/${images.length} 张图片...`);
 
-      // 确保 MIME 类型符合 Anthropic API 要求
-      const mimeType = (images[i].mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp') || 'image/jpeg';
-
-      const result = await analyzeImageWithVLM(images[i].base64, mimeType, customPrompt);
+      const result = await analyzeImageWithVLM(images[i].base64, images[i].mimeType, customPrompt);
       results.push(result);
 
       // 添加延迟以避免 API 限流
@@ -183,6 +210,12 @@ function extractTextFromVLMResponse(response: string): string {
     return quoteMatches.map(m => m.replace(/[「『"」』"]/g, '')).join('\n');
   }
 
+  // 如果找不到特定格式，尝试提取包含"内容"或"文本"的段落
+  const contentMatch = response.match(/(?:内容|文本|文字)[:：]\s*(.+)/);
+  if (contentMatch && contentMatch[1]) {
+    return contentMatch[1].trim();
+  }
+
   return '';
 }
 
@@ -196,7 +229,8 @@ function extractObjectsFromVLMResponse(response: string): string[] {
   const keywords = [
     '截图', 'screenshot', '照片', 'photo', '图表', 'chart',
     '代码', 'code', '文档', 'document', '设计', 'design',
-    '界面', 'UI', '网页', 'webpage', '海报', 'poster'
+    '界面', 'UI', '网页', 'webpage', '海报', 'poster',
+    '公式', 'formula', '表格', 'table', '流程图', 'flowchart'
   ];
 
   for (const keyword of keywords) {
@@ -213,23 +247,24 @@ function extractObjectsFromVLMResponse(response: string): string[] {
  *
  * @param imageCount 图片数量
  * @param avgTokensPerImage 每张图片平均 token 数（默认约 1500）
- * @returns 估算成本（美元）
+ * @returns 估算成本（人民币元）
  */
 export function estimateVLMCost(
   imageCount: number,
   avgTokensPerImage: number = 1500
 ): { inputCost: number; outputCost: number; totalCost: number } {
-  // Claude 3.5 Sonnet 定价（截至 2024年）
-  const inputCostPerMToken = 3.0;   // $3.00 / million tokens
-  const outputCostPerMToken = 15.0;  // $15.00 / million tokens
+  // Qwen VL 定价（需要根据智增增实际定价调整，这里使用估算值）
+  // 假设：¥0.001/1K tokens（输入），¥0.002/1K tokens（输出）
+  const inputCostPerKToken = 0.001;
+  const outputCostPerKToken = 0.002;
 
   const avgOutputTokens = 500;  // 平均输出 500 tokens
 
   const totalInputTokens = imageCount * avgTokensPerImage;
   const totalOutputTokens = imageCount * avgOutputTokens;
 
-  const inputCost = (totalInputTokens / 1_000_000) * inputCostPerMToken;
-  const outputCost = (totalOutputTokens / 1_000_000) * outputCostPerMToken;
+  const inputCost = (totalInputTokens / 1000) * inputCostPerKToken;
+  const outputCost = (totalOutputTokens / 1000) * outputCostPerKToken;
   const totalCost = inputCost + outputCost;
 
   return {
@@ -246,7 +281,7 @@ export function printVLMCostEstimate(imageCount: number): void {
   const cost = estimateVLMCost(imageCount);
 
   logger.info(`\n💰 VLM API 成本估算 (${imageCount} 张图片):`);
-  logger.info(`   输入成本: $${cost.inputCost.toFixed(4)}`);
-  logger.info(`   输出成本: $${cost.outputCost.toFixed(4)}`);
-  logger.info(`   总计: $${cost.totalCost.toFixed(4)}\n`);
+  logger.info(`   输入成本: ¥${cost.inputCost.toFixed(4)}`);
+  logger.info(`   输出成本: ¥${cost.outputCost.toFixed(4)}`);
+  logger.info(`   总计: ¥${cost.totalCost.toFixed(4)}\n`);
 }

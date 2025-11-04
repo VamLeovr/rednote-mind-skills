@@ -37,8 +37,9 @@ import { searchNotesByKeyword } from './tools/search';
 import { getFavoritesList } from './tools/favoritesList';
 import { getNoteContent, type NoteContentOptions } from './tools/noteContent';
 import { getBatchNotesFromFavorites } from './tools/batchNotes';
-import { downloadNoteImages, type ImageDownloadOptions } from './tools/imageDownloader';
+import { downloadNoteImages, saveImagesToLocal, type ImageDownloadOptions } from './tools/imageDownloader';
 import type { NoteContentWithImages, ImageData } from './types';
+import { analyzeImageWithVLM, analyzeImages, isVLMAvailable } from './tools/vlmAnalyzer';
 
 // Cookie 存储路径
 const COOKIE_PATH = path.join(os.homedir(), '.mcp', 'rednote', 'cookies.json');
@@ -49,12 +50,29 @@ let context: BrowserContext | null = null;
 let page: Page | null = null;
 
 /**
- * 将笔记内容转换为 MCP content 数组
- * 关键：图片作为 image content 返回，而不是 JSON 字符串
- * 这样 Claude Desktop 才能直接显示图片
+ * MCP Content 类型定义
  */
-function convertNoteToMCPContent(note: NoteContentWithImages): Array<{type: string; text?: string; source?: any}> {
-  const content: Array<{type: string; text?: string; source?: any}> = [];
+type MCPContent =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string };
+
+/**
+ * 图片处理模式
+ */
+type ImageMode = 'original' | 'vlm';
+
+/**
+ * 将笔记内容转换为 MCP content 数组
+ *
+ * @param note 笔记内容（含图片）
+ * @param imageMode 图片处理模式：original=返回原始图片，vlm=VLM分析文字描述
+ * @returns MCP content 数组
+ */
+async function convertNoteToMCPContent(
+  note: NoteContentWithImages,
+  imageMode: ImageMode = 'original'
+): Promise<MCPContent[]> {
+  const content: MCPContent[] = [];
 
   // 1. 文本信息（标题、正文、元数据）
   let textContent = `# ${note.title}\n\n`;
@@ -97,72 +115,72 @@ function convertNoteToMCPContent(note: NoteContentWithImages): Array<{type: stri
     text: textContent
   });
 
-  // 2. 图片（作为 MCP image content）
+  // 2. 图片处理：根据 imageMode 决定返回原始图片还是 VLM 分析
   if (note.images && note.images.length > 0) {
-    for (let i = 0; i < note.images.length; i++) {
-      const img = note.images[i];
-      content.push({
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: img.mimeType,
-          data: img.base64  // 注意：不带 data:image/jpeg;base64, 前缀
+    if (imageMode === 'vlm') {
+      // VLM 模式：分析所有图片并返回文字描述
+      if (isVLMAvailable()) {
+        try {
+          console.error(`🔍 使用 VLM 分析 ${note.images.length} 张图片...`);
+
+          const vlmResults = await analyzeImages(note.images);
+
+          // 添加 VLM 分析结果作为文本
+          let vlmText = `\n---\n## 🔍 VLM 图片分析结果\n\n`;
+          vlmText += `共分析 ${note.images.length} 张图片：\n\n`;
+
+          vlmResults.forEach((result, idx) => {
+            vlmText += `### 图片 ${idx + 1}\n`;
+            vlmText += `${result.description}\n\n`;
+
+            if (result.textContent) {
+              vlmText += `**提取的文字内容**:\n${result.textContent}\n\n`;
+            }
+
+            if (result.detectedObjects.length > 0) {
+              vlmText += `**检测到的元素**: ${result.detectedObjects.join(', ')}\n\n`;
+            }
+          });
+
+          content.push({
+            type: 'text',
+            text: vlmText
+          });
+
+          console.error(`✅ VLM 分析完成`);
+
+        } catch (error: any) {
+          console.error(`❌ VLM 分析失败: ${error.message}`);
+
+          // VLM 失败时添加警告
+          content.push({
+            type: 'text',
+            text: `\n⚠️ VLM 分析失败: ${error.message}\n`
+          });
         }
-      });
-    }
-  }
-
-  return content;
-}
-
-/**
- * 将图片数组转换为 MCP content 数组
- */
-function convertImagesToMCPContent(images: ImageData[]): Array<{type: string; text?: string; source?: any}> {
-  const content: Array<{type: string; text?: string; source?: any}> = [];
-
-  // 1. 文本摘要
-  let textContent = `成功下载 ${images.length} 张图片\n\n`;
-
-  const compressedImages = images.filter(img => img.compressionRatio !== undefined);
-  if (compressedImages.length > 0) {
-    const totalOriginal = compressedImages.reduce((sum, img) => sum + (img.originalSize || 0), 0);
-    const totalCompressed = compressedImages.reduce((sum, img) => sum + img.size, 0);
-    const avgRatio = compressedImages.reduce((sum, img) => sum + (img.compressionRatio || 0), 0) / compressedImages.length;
-
-    textContent += `**压缩统计**:\n`;
-    textContent += `- 原始总大小: ${(totalOriginal / 1024 / 1024).toFixed(2)} MB\n`;
-    textContent += `- 压缩后大小: ${(totalCompressed / 1024 / 1024).toFixed(2)} MB\n`;
-    textContent += `- 平均压缩率: ${avgRatio.toFixed(1)}%\n\n`;
-  }
-
-  images.forEach((img, idx) => {
-    textContent += `**图片 ${idx + 1}**:\n`;
-    if (img.width && img.height) {
-      textContent += `- 尺寸: ${img.width}x${img.height}\n`;
-    }
-    textContent += `- 大小: ${(img.size / 1024).toFixed(2)} KB\n`;
-    if (img.compressionRatio) {
-      textContent += `- 压缩率: ${img.compressionRatio.toFixed(1)}%\n`;
-    }
-    textContent += `- URL: ${img.url.substring(0, 60)}...\n\n`;
-  });
-
-  content.push({
-    type: 'text',
-    text: textContent
-  });
-
-  // 2. 图片
-  for (const img of images) {
-    content.push({
-      type: 'image',
-      source: {
-        type: 'base64',
-        media_type: img.mimeType,
-        data: img.base64
+      } else {
+        // VLM 不可用时添加警告
+        content.push({
+          type: 'text',
+          text: `\n⚠️ 无法使用 VLM 分析：请设置 ZZZ_API_KEY 环境变量\n`
+        });
       }
-    });
+    } else {
+      // Original 模式：返回压缩后的原始图片（Base64）
+      for (const img of note.images) {
+        content.push({
+          type: 'image',
+          data: img.base64,  // MCP 格式：直接 base64 字符串
+          mimeType: img.mimeType
+        });
+      }
+
+      // 添加大小统计信息
+      const totalSize = note.images.reduce((sum, img) =>
+        sum + Buffer.from(img.base64, 'base64').length, 0
+      );
+      console.error(`📊 返回图片: ${note.images.length} 张, 总大小: ${(totalSize / 1024).toFixed(1)}KB`);
+    }
   }
 
   return content;
@@ -303,7 +321,7 @@ const tools: Tool[] = [
   },
   {
     name: 'get_note_content',
-    description: '获取笔记的完整内容。可选择是否包含图片和详细数据（标签、点赞、收藏、评论）。图片会自动压缩以节省传输体积。重要：必须使用从 get_favorites_list 或 search_notes_by_keyword 返回的带 xsec_token 参数的完整 URL，否则可能访问失败。',
+    description: '获取笔记的完整内容。可选择是否包含图片和详细数据（标签、点赞、收藏、评论）。图片处理模式：original 返回压缩后的原始图片（Base64），vlm 使用智增增 VLM 分析图片并返回文字描述（需设置 ZZZ_API_KEY）。重要：必须使用从 get_favorites_list 或 search_notes_by_keyword 返回的带 xsec_token 参数的完整 URL，否则可能访问失败。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -321,6 +339,12 @@ const tools: Tool[] = [
           description: '是否包含详细数据（标签、点赞、收藏、评论数，默认 true）',
           default: true
         },
+        imageMode: {
+          type: 'string',
+          description: '图片处理模式：original=返回原始图片Base64（默认），vlm=使用VLM分析并返回文字描述',
+          enum: ['original', 'vlm'],
+          default: 'original'
+        },
         compressImages: {
           type: 'boolean',
           description: '是否压缩图片以节省传输体积（默认 true，强烈推荐）',
@@ -328,15 +352,15 @@ const tools: Tool[] = [
         },
         imageQuality: {
           type: 'number',
-          description: '图片压缩质量 50-95（默认 75，值越高质量越好但体积越大）',
-          default: 75,
+          description: '图片压缩质量 50-95（默认 65，值越高质量越好但体积越大）',
+          default: 65,
           minimum: 50,
           maximum: 95
         },
         maxImageSize: {
           type: 'number',
-          description: '图片最大尺寸（像素，默认 1920，足够 Claude 分析）',
-          default: 1920,
+          description: '图片最大尺寸（像素，默认 1600）',
+          default: 1600,
           minimum: 960,
           maximum: 2560
         }
@@ -367,7 +391,7 @@ const tools: Tool[] = [
   },
   {
     name: 'download_note_images',
-    description: '下载笔记的所有图片（Base64 编码），包括轮播图中的所有图片。图片会自动压缩以节省传输体积。重要：必须使用从 get_favorites_list 或 search_notes_by_keyword 返回的带 xsec_token 参数的完整 URL，否则可能访问失败。',
+    description: '下载笔记的所有图片并保存到本地 ~/.mcp/rednote/images/{noteId}/ 目录，返回文件路径列表。包括轮播图中的所有图片。图片会自动压缩以节省存储空间。重要：必须使用从 get_favorites_list 或 search_notes_by_keyword 返回的带 xsec_token 参数的完整 URL，否则可能访问失败。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -498,11 +522,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           noteUrl: z.string(),
           includeImages: z.boolean().default(true),
           includeData: z.boolean().default(true),
+          imageMode: z.enum(['original', 'vlm']).default('original'),
           compressImages: z.boolean().default(true),
-          imageQuality: z.number().min(50).max(95).default(75),
-          maxImageSize: z.number().min(960).max(2560).default(1920)
+          imageQuality: z.number().min(50).max(95).default(65),
+          maxImageSize: z.number().min(960).max(2560).default(1600)
         });
-        const { noteUrl, includeImages, includeData, compressImages, imageQuality, maxImageSize } = schema.parse(args);
+        const { noteUrl, includeImages, includeData, imageMode, compressImages, imageQuality, maxImageSize } = schema.parse(args);
 
         const options: NoteContentOptions = {
           includeImages,
@@ -514,9 +539,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const noteContent = await getNoteContent(currentPage, noteUrl, options);
 
-        // 使用 MCP content 格式返回，图片作为 image content
+        // 使用 MCP content 格式返回，根据 imageMode 处理图片
         return {
-          content: convertNoteToMCPContent(noteContent)
+          content: await convertNoteToMCPContent(noteContent, imageMode as ImageMode)
         };
       }
 
@@ -557,9 +582,53 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const images = await downloadNoteImages(currentPage, noteUrl, options);
 
-        // 使用 MCP content 格式返回，图片作为 image content
+        // 提取笔记 ID（从 URL 中提取 /explore/ 后面的部分）
+        const noteIdMatch = noteUrl.match(/\/explore\/([a-f0-9]+)/);
+        const noteId = noteIdMatch ? noteIdMatch[1] : `note_${Date.now()}`;
+
+        // 保存图片到本地并获取文件路径
+        const savedPaths = saveImagesToLocal(images, noteId);
+
+        // 返回文件路径列表和统计信息
+        let resultText = `# 图片下载完成\n\n`;
+        resultText += `**笔记 ID**: ${noteId}\n`;
+        resultText += `**图片数量**: ${images.length} 张\n`;
+        resultText += `**保存位置**: ~/.mcp/rednote/images/${noteId}/\n\n`;
+
+        // 添加压缩统计
+        const compressedImages = images.filter(img => img.compressionRatio !== undefined);
+        if (compressedImages.length > 0) {
+          const totalOriginal = compressedImages.reduce((sum, img) => sum + (img.originalSize || 0), 0);
+          const totalCompressed = compressedImages.reduce((sum, img) => sum + img.size, 0);
+          const avgRatio = compressedImages.reduce((sum, img) => sum + (img.compressionRatio || 0), 0) / compressedImages.length;
+
+          resultText += `**压缩统计**:\n`;
+          resultText += `- 原始总大小: ${(totalOriginal / 1024 / 1024).toFixed(2)} MB\n`;
+          resultText += `- 压缩后大小: ${(totalCompressed / 1024 / 1024).toFixed(2)} MB\n`;
+          resultText += `- 平均压缩率: ${avgRatio.toFixed(1)}%\n\n`;
+        }
+
+        resultText += `## 文件路径列表\n\n`;
+        savedPaths.forEach((filePath, idx) => {
+          const img = images[idx];
+          resultText += `**图片 ${idx + 1}**: \`${filePath}\`\n`;
+          if (img.width && img.height) {
+            resultText += `- 尺寸: ${img.width}x${img.height}\n`;
+          }
+          resultText += `- 大小: ${(img.size / 1024).toFixed(2)} KB\n`;
+          if (img.compressionRatio) {
+            resultText += `- 压缩率: ${img.compressionRatio.toFixed(1)}%\n`;
+          }
+          resultText += `\n`;
+        });
+
         return {
-          content: convertImagesToMCPContent(images)
+          content: [
+            {
+              type: 'text',
+              text: resultText
+            }
+          ]
         };
       }
 

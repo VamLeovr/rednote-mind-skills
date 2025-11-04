@@ -521,8 +521,8 @@ export function saveImagesToLocal(
   noteId: string,
   outputDir?: string
 ): string[] {
-  // 默认保存到临时目录
-  const baseDir = outputDir || path.join(os.tmpdir(), 'rednote-images');
+  // 默认保存到 ~/.mcp/rednote/images/ 目录
+  const baseDir = outputDir || path.join(os.homedir(), '.mcp', 'rednote', 'images');
 
   // 创建笔记专用目录
   const noteDir = path.join(baseDir, noteId);
