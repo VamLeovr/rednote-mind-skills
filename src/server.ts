@@ -162,7 +162,7 @@ async function convertNoteToMCPContent(
         // VLM 不可用时添加警告
         content.push({
           type: 'text',
-          text: `\n⚠️ 无法使用 VLM 分析：请设置 ZZZ_API_KEY 环境变量\n`
+          text: `\n⚠️ 无法使用 VLM 分析：请设置 ZZZ_API_KEY 或 ZHIPU_API_KEY 环境变量\n`
         });
       }
     } else {
@@ -241,7 +241,7 @@ async function closeBrowser() {
 const server = new Server(
   {
     name: 'rednote-mind-mcp',
-    version: '0.2.6',
+    version: '0.2.9',
   },
   {
     capabilities: {
@@ -321,7 +321,7 @@ const tools: Tool[] = [
   },
   {
     name: 'get_note_content',
-    description: '获取笔记的完整内容。可选择是否包含图片和详细数据（标签、点赞、收藏、评论）。图片处理模式：original 返回压缩后的原始图片（Base64），vlm 使用智增增 VLM 分析图片并返回文字描述（需设置 ZZZ_API_KEY）。重要：必须使用从 get_favorites_list 或 search_notes_by_keyword 返回的带 xsec_token 参数的完整 URL，否则可能访问失败。',
+    description: '获取笔记的完整内容。可选择是否包含图片和详细数据（标签、点赞、收藏、评论）。图片处理模式：original 返回压缩后的原始图片（Base64），vlm 使用 VLM 分析图片并返回文字描述（支持智增增 ZZZ_API_KEY 或智谱 ZHIPU_API_KEY，优先使用智增增）。重要：必须使用从 get_favorites_list 或 search_notes_by_keyword 返回的带 xsec_token 参数的完整 URL，否则可能访问失败。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -341,7 +341,7 @@ const tools: Tool[] = [
         },
         imageMode: {
           type: 'string',
-          description: '图片处理模式：original=返回原始图片Base64（默认），vlm=使用VLM分析并返回文字描述',
+          description: '图片处理模式：original=返回原始图片Base64（默认），vlm=使用VLM分析并返回文字描述（支持智增增或智谱API）',
           enum: ['original', 'vlm'],
           default: 'original'
         },
@@ -667,7 +667,7 @@ async function main() {
   await server.connect(transport);
 
   console.error('🚀 Rednote-Mind-MCP Server 已启动');
-  console.error('📦 版本: 0.2.6');
+  console.error('📦 版本: 0.2.9');
   console.error('🔧 支持的工具:');
   tools.forEach(tool => {
     console.error(`  - ${tool.name}: ${tool.description}`);

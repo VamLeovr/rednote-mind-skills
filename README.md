@@ -80,15 +80,17 @@ Claude自动调用MCP工具：
   - 支持批量下载（论文截图、图表、配方图）
 
 #### 🤖 VLM 图片分析（可选）
-- 使用智增增 API (Qwen VL) 分析图片内容
+- 支持多个 VLM API 提供商（智增增 Qwen VL、智谱 GLM-4V）
   - 自动提取图片中的文字（OCR）
   - 生成结构化描述（对象、场景、类型）
   - 适合大量文字截图的快速提取
   - **用户可选模式**：
     - `imageMode: 'original'`（默认）- 返回压缩后的原始图片 Base64
     - `imageMode: 'vlm'` - 使用 VLM 分析并返回文字描述
-  - 需设置 `ZZZ_API_KEY` 环境变量启用 VLM 模式
-  - 成本：约 ¥0.003/张图片（较 Claude API 节省 90%）
+  - **API 配置**（二选一）：
+    - 智增增：设置 `ZZZ_API_KEY` 环境变量（推荐，成本约 ¥0.003/张）
+    - 智谱清言：设置 `ZHIPU_API_KEY` 环境变量（成本约 ¥0.0075/张）
+  - 优先级：智增增 > 智谱清言
 
 ### 🌟 核心优势
 
@@ -126,16 +128,30 @@ rednote-mind-mcp init
 
 ### 可选：配置 VLM 功能
 
-如需启用智能图片分析（当图片总量超过 900KB 时自动触发），需要配置智增增 API：
+如需启用智能图片分析（VLM 模式），可以选择配置以下任一 API：
 
-1. **获取 API Key**：访问 [智增增官网](https://zhizengzeng.com) 注册并获取 API Key
+#### 支持的 VLM 提供商
+
+| 提供商 | 环境变量 | 模型 | 成本 | 获取方式 |
+|--------|---------|------|------|---------|
+| **智增增** (推荐) | `ZZZ_API_KEY` | Qwen VL | ¥0.001-0.002/1K tokens | [智增增官网](https://zhizengzeng.com) |
+| **智谱清言** | `ZHIPU_API_KEY` | GLM-4V | ¥0.005/1K tokens | [智谱开放平台](https://bigmodel.cn) |
+
+**优先级**：如果同时配置多个 API Key，系统按以下顺序使用：智增增 > 智谱清言
+
+#### 配置步骤
+
+1. **获取 API Key**：
+   - **智增增**：访问 [zhizengzeng.com](https://zhizengzeng.com) 注册获取
+   - **智谱清言**：访问 [bigmodel.cn](https://bigmodel.cn/usercenter/proj-mgmt/apikeys) 获取
 
 2. **设置环境变量**：
 
    **macOS/Linux**：
    ```bash
-   # 在 ~/.zshrc 或 ~/.bashrc 中添加
-   export ZZZ_API_KEY="your_api_key_here"
+   # 在 ~/.zshrc 或 ~/.bashrc 中添加（二选一或同时配置）
+   export ZZZ_API_KEY="your_zzz_api_key_here"
+   export ZHIPU_API_KEY="your_zhipu_api_key_here"
 
    # 重新加载配置
    source ~/.zshrc  # 或 source ~/.bashrc
@@ -143,16 +159,19 @@ rednote-mind-mcp init
 
    **Windows**：
    ```cmd
-   # 在系统环境变量中添加
-   setx ZZZ_API_KEY "your_api_key_here"
+   # 在系统环境变量中添加（二选一或同时配置）
+   setx ZZZ_API_KEY "your_zzz_api_key_here"
+   setx ZHIPU_API_KEY "your_zhipu_api_key_here"
    ```
 
 3. **重启 MCP 客户端**：重启 Claude Desktop 或其他客户端使环境变量生效
 
-**VLM 功能说明**：
-- 当 `get_note_content` 返回的图片总量超过 900KB 时，自动使用 VLM 分析超出部分
-- 无需手动配置，自动触发
-- 分析结果以文本形式返回，包含图片中的文字和结构化描述
+#### VLM 功能说明
+
+- **使用场景**：用户在 `get_note_content` 工具中主动选择 `imageMode: 'vlm'`
+- **功能**：将图片发送到 VLM API，提取图片中的文字和结构化描述
+- **优势**：适合大量文字截图的快速提取，无需传输完整图片给 Claude
+- **成本**：智增增约 ¥0.003/张图片，智谱约 ¥0.0075/张图片
 
 ### 配置MCP客户端
 
@@ -360,7 +379,9 @@ rednote-mind-mcp init
 
 ### 示例3：使用 VLM 分析图片文字
 
-**场景：**论文笔记包含大量公式和表格截图，希望直接提取文字内容而非查看图片。
+**场景**：论文笔记包含大量公式和表格截图，希望直接提取文字内容而非查看图片。
+
+**前提**：已配置 `ZZZ_API_KEY` 或 `ZHIPU_API_KEY` 环境变量
 
 **在Claude Desktop中发送：**
 
@@ -379,6 +400,11 @@ rednote-mind-mcp init
 
 **返回结果示例：**
 ```markdown
+# 笔记标题
+
+🔍 使用 智增增 VLM (qwen3-vl-235b-a22b-thinking) 分析图片...
+
+---
 ## 🔍 VLM 图片分析结果
 
 共分析 3 张图片：

@@ -1,23 +1,76 @@
 /**
  * VLM (Vision Language Model) 图片分析模块
- * 使用智增增 API (Qwen VL) 预分析图片内容，提取文字和结构化描述
- * 这是一个可选功能，需要设置 ZZZ_API_KEY 环境变量
+ * 支持多个 VLM API 提供商：智增增 Qwen VL、智谱清言 GLM-4V
+ * 用户可选择配置任意一个 API Key：ZZZ_API_KEY 或 ZHIPU_API_KEY
+ * 优先级：智增增 > 智谱清言
  */
 
 import { logger } from './logger';
 import type { VLMAnalysisResult, ImageData } from '../types';
 
 /**
- * 智增增 API 配置
+ * VLM 提供商配置
  */
-const ZZZ_API_URL = 'https://api.zhizengzeng.com/v1/chat/completions';
-const ZZZ_VLM_MODEL = 'qwen3-vl-235b-a22b-thinking';
+interface VLMProvider {
+  name: string;
+  apiUrl: string;
+  model: string;
+  envKey: string;
+  inputCostPerKToken: number;
+  outputCostPerKToken: number;
+}
+
+/**
+ * 支持的 VLM 提供商列表（按优先级排序）
+ */
+const VLM_PROVIDERS: VLMProvider[] = [
+  {
+    name: '智增增',
+    apiUrl: 'https://api.zhizengzeng.com/v1/chat/completions',
+    model: 'qwen3-vl-235b-a22b-thinking',
+    envKey: 'ZZZ_API_KEY',
+    inputCostPerKToken: 0.001,
+    outputCostPerKToken: 0.002
+  },
+  {
+    name: '智谱清言',
+    apiUrl: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+    model: 'glm-4v',
+    envKey: 'ZHIPU_API_KEY',
+    inputCostPerKToken: 0.005,
+    outputCostPerKToken: 0.005
+  }
+];
+
+/**
+ * 获取当前可用的 VLM 提供商
+ * 优先级：智增增 > 智谱清言
+ */
+function getAvailableProvider(): VLMProvider | null {
+  for (const provider of VLM_PROVIDERS) {
+    if (process.env[provider.envKey]) {
+      return provider;
+    }
+  }
+  return null;
+}
 
 /**
  * 检查 VLM 功能是否可用
  */
 export function isVLMAvailable(): boolean {
-  return !!process.env.ZZZ_API_KEY;
+  return getAvailableProvider() !== null;
+}
+
+/**
+ * 获取当前使用的 VLM 提供商信息
+ */
+export function getVLMProviderInfo(): string {
+  const provider = getAvailableProvider();
+  if (!provider) {
+    return '未配置 VLM API Key';
+  }
+  return `${provider.name} (${provider.model})`;
 }
 
 /**
@@ -34,9 +87,13 @@ export async function analyzeImageWithVLM(
   customPrompt?: string
 ): Promise<VLMAnalysisResult> {
 
-  if (!process.env.ZZZ_API_KEY) {
-    throw new Error('VLM 功能不可用：请设置 ZZZ_API_KEY 环境变量');
+  const provider = getAvailableProvider();
+
+  if (!provider) {
+    throw new Error('VLM 功能不可用：请设置 ZZZ_API_KEY 或 ZHIPU_API_KEY 环境变量');
   }
+
+  const apiKey = process.env[provider.envKey];
 
   // 默认提示词：提取文字和描述图片内容
   const defaultPrompt = `请详细分析这张图片，并提供以下信息：
@@ -51,11 +108,11 @@ export async function analyzeImageWithVLM(
   const prompt = customPrompt || defaultPrompt;
 
   try {
-    logger.debug(`🔍 使用智增增 VLM (${ZZZ_VLM_MODEL}) 分析图片...`);
+    logger.debug(`🔍 使用 ${provider.name} VLM (${provider.model}) 分析图片...`);
 
     // 构建符合 OpenAI vision 格式的请求
     const requestBody = {
-      model: ZZZ_VLM_MODEL,
+      model: provider.model,
       messages: [
         {
           role: 'user',
@@ -73,18 +130,19 @@ export async function analyzeImageWithVLM(
           ]
         }
       ],
-      max_tokens: 1024
+      max_tokens: 1024,
+      stream: false
     };
 
-    // 调用智增增 API
-    logger.debug(`调用 API: ${ZZZ_API_URL}`);
+    // 调用 VLM API
+    logger.debug(`调用 API: ${provider.apiUrl}`);
     logger.debug(`请求体大小: ${JSON.stringify(requestBody).length} 字节`);
 
-    const response = await fetch(ZZZ_API_URL, {
+    const response = await fetch(provider.apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.ZZZ_API_KEY}`
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify(requestBody)
     });
@@ -94,18 +152,18 @@ export async function analyzeImageWithVLM(
     const data = await response.json();
 
     // 调试：打印完整响应
-    logger.debug('智增增 API 原始响应:', JSON.stringify(data, null, 2));
+    logger.debug(`${provider.name} API 原始响应:`, JSON.stringify(data, null, 2));
 
     // 检查 API 错误
     if (data.error) {
       const errorMsg = data.error.message || JSON.stringify(data.error);
-      logger.error('智增增 API 错误:', errorMsg);
-      throw new Error(`智增增 API 错误: ${errorMsg}`);
+      logger.error(`${provider.name} API 错误:`, errorMsg);
+      throw new Error(`${provider.name} API 错误: ${errorMsg}`);
     }
 
     // 检查 HTTP 状态
     if (!response.ok) {
-      throw new Error(`智增增 API 调用失败: ${response.status} ${JSON.stringify(data)}`);
+      throw new Error(`${provider.name} API 调用失败: ${response.status} ${JSON.stringify(data)}`);
     }
 
     // 提取响应文本
@@ -252,25 +310,32 @@ function extractObjectsFromVLMResponse(response: string): string[] {
 export function estimateVLMCost(
   imageCount: number,
   avgTokensPerImage: number = 1500
-): { inputCost: number; outputCost: number; totalCost: number } {
-  // Qwen VL 定价（需要根据智增增实际定价调整，这里使用估算值）
-  // 假设：¥0.001/1K tokens（输入），¥0.002/1K tokens（输出）
-  const inputCostPerKToken = 0.001;
-  const outputCostPerKToken = 0.002;
+): { inputCost: number; outputCost: number; totalCost: number; provider: string } {
+  const provider = getAvailableProvider();
+
+  if (!provider) {
+    return {
+      inputCost: 0,
+      outputCost: 0,
+      totalCost: 0,
+      provider: '未配置'
+    };
+  }
 
   const avgOutputTokens = 500;  // 平均输出 500 tokens
 
   const totalInputTokens = imageCount * avgTokensPerImage;
   const totalOutputTokens = imageCount * avgOutputTokens;
 
-  const inputCost = (totalInputTokens / 1000) * inputCostPerKToken;
-  const outputCost = (totalOutputTokens / 1000) * outputCostPerKToken;
+  const inputCost = (totalInputTokens / 1000) * provider.inputCostPerKToken;
+  const outputCost = (totalOutputTokens / 1000) * provider.outputCostPerKToken;
   const totalCost = inputCost + outputCost;
 
   return {
     inputCost,
     outputCost,
-    totalCost
+    totalCost,
+    provider: provider.name
   };
 }
 
@@ -280,7 +345,7 @@ export function estimateVLMCost(
 export function printVLMCostEstimate(imageCount: number): void {
   const cost = estimateVLMCost(imageCount);
 
-  logger.info(`\n💰 VLM API 成本估算 (${imageCount} 张图片):`);
+  logger.info(`\n💰 VLM API 成本估算 (${imageCount} 张图片, 提供商: ${cost.provider}):`);
   logger.info(`   输入成本: ¥${cost.inputCost.toFixed(4)}`);
   logger.info(`   输出成本: ¥${cost.outputCost.toFixed(4)}`);
   logger.info(`   总计: ¥${cost.totalCost.toFixed(4)}\n`);
