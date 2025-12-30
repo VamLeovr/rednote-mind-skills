@@ -128,7 +128,9 @@ rednote-mind-mcp init
 
 ### 可选：配置 VLM 功能
 
-如需启用智能图片分析（VLM 模式），可以选择配置以下任一 API：
+**🎁 开箱即用**：本工具已内置智谱 GLM-4V 的测试 API Key，无需配置即可使用 VLM 图片分析功能！
+
+如需更稳定的服务和更高配额，可以选择配置以下任一 API：
 
 #### 支持的 VLM 提供商
 
@@ -136,16 +138,19 @@ rednote-mind-mcp init
 |--------|---------|------|------|---------|
 | **智增增** (推荐) | `ZZZ_API_KEY` | Qwen VL | ¥0.001-0.002/1K tokens | [智增增官网](https://zhizengzeng.com) |
 | **智谱清言** | `ZHIPU_API_KEY` | GLM-4V | ¥0.005/1K tokens | [智谱开放平台](https://bigmodel.cn) |
+| **默认测试** | 无需配置 | GLM-4V | 内置测试 Key | 开箱即用 |
 
-**优先级**：如果同时配置多个 API Key，系统按以下顺序使用：智增增 > 智谱清言
+**优先级**：如果同时配置多个 API Key，系统按以下顺序使用：智增增 > 智谱清言 > 默认测试 Key
 
-#### 配置步骤
+#### 配置步骤（可选）
 
-1. **获取 API Key**：
+**注意**：如果您使用默认测试 Key，可以跳过此配置步骤，直接开始使用 VLM 功能。
+
+1. **获取 API Key**（如需更高配额）：
    - **智增增**：访问 [zhizengzeng.com](https://zhizengzeng.com) 注册获取
    - **智谱清言**：访问 [bigmodel.cn](https://bigmodel.cn/usercenter/proj-mgmt/apikeys) 获取
 
-2. **设置环境变量**：
+2. **设置环境变量**（替换默认 Key）：
 
    **macOS/Linux**：
    ```bash
@@ -171,7 +176,10 @@ rednote-mind-mcp init
 - **使用场景**：用户在 `get_note_content` 工具中主动选择 `imageMode: 'vlm'`
 - **功能**：将图片发送到 VLM API，提取图片中的文字和结构化描述
 - **优势**：适合大量文字截图的快速提取，无需传输完整图片给 Claude
-- **成本**：智增增约 ¥0.003/张图片，智谱约 ¥0.0075/张图片
+- **成本**：
+  - 默认测试 Key：免费使用（有配额限制）
+  - 智增增：约 ¥0.003/张图片
+  - 智谱：约 ¥0.0075/张图片
 
 ### 配置MCP客户端
 

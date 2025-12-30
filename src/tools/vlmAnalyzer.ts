@@ -43,8 +43,14 @@ const VLM_PROVIDERS: VLMProvider[] = [
 ];
 
 /**
+ * 默认测试 API Key（仅用于演示和测试）
+ * 用户应配置自己的 API Key 以获得更好的体验
+ */
+const DEFAULT_ZHIPU_API_KEY = '14832a226ca5432a83cdae0092ecb77a.tM9KN8Xlf18QCkEz';
+
+/**
  * 获取当前可用的 VLM 提供商
- * 优先级：智增增 > 智谱清言
+ * 优先级：智增增 > 智谱清言（含默认测试 Key）
  */
 function getAvailableProvider(): VLMProvider | null {
   for (const provider of VLM_PROVIDERS) {
@@ -52,6 +58,16 @@ function getAvailableProvider(): VLMProvider | null {
       return provider;
     }
   }
+
+  // 如果没有配置环境变量，使用智谱的默认测试 API Key
+  const zhipuProvider = VLM_PROVIDERS.find(p => p.envKey === 'ZHIPU_API_KEY');
+  if (zhipuProvider) {
+    // 临时设置默认 Key（仅当前进程有效）
+    process.env.ZHIPU_API_KEY = DEFAULT_ZHIPU_API_KEY;
+    logger.debug('使用默认测试 API Key（智谱 GLM-4V）');
+    return zhipuProvider;
+  }
+
   return null;
 }
 
