@@ -241,7 +241,7 @@ async function closeBrowser() {
 const server = new Server(
   {
     name: 'rednote-mind-mcp',
-    version: '0.2.9',
+    version: '0.3.0',
   },
   {
     capabilities: {
@@ -321,7 +321,7 @@ const tools: Tool[] = [
   },
   {
     name: 'get_note_content',
-    description: '获取笔记的完整内容。可选择是否包含图片和详细数据（标签、点赞、收藏、评论）。图片处理模式：original 返回压缩后的原始图片（Base64），vlm 使用 VLM 分析图片并返回文字描述（支持智增增 ZZZ_API_KEY 或智谱 ZHIPU_API_KEY，优先使用智增增）。重要：必须使用从 get_favorites_list 或 search_notes_by_keyword 返回的带 xsec_token 参数的完整 URL，否则可能访问失败。',
+    description: '获取笔记的完整内容。可选择是否包含图片和详细数据（标签、点赞、收藏、评论）。图片处理模式：original 返回压缩后的原始图片（Base64），vlm 使用 VLM 分析图片并返回文字描述（支持智增增 ZZZ_API_KEY、Jina JINA_API_KEY 或智谱 ZHIPU_API_KEY，按此优先级选择）。重要：必须使用从 get_favorites_list 或 search_notes_by_keyword 返回的带 xsec_token 参数的完整 URL，否则可能访问失败。',
     inputSchema: {
       type: 'object',
       properties: {

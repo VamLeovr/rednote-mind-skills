@@ -1,8 +1,8 @@
 /**
  * VLM (Vision Language Model) 图片分析模块
- * 支持多个 VLM API 提供商：智增增 Qwen VL、智谱清言 GLM-4V
- * 用户可选择配置任意一个 API Key：ZZZ_API_KEY 或 ZHIPU_API_KEY
- * 优先级：智增增 > 智谱清言
+ * 支持多个 VLM API 提供商：智增增 Qwen VL、Jina AI、智谱清言 GLM-4V
+ * 用户可选择配置任意一个 API Key：ZZZ_API_KEY、JINA_API_KEY 或 ZHIPU_API_KEY
+ * 优先级：智增增 > Jina > 智谱清言
  */
 
 import { logger } from './logger';
@@ -30,6 +30,14 @@ const VLM_PROVIDERS: VLMProvider[] = [
     model: 'qwen3-vl-235b-a22b-thinking',
     envKey: 'ZZZ_API_KEY',
     inputCostPerKToken: 0.001,
+    outputCostPerKToken: 0.002
+  },
+  {
+    name: 'Jina',
+    apiUrl: 'https://api.jina.ai/v1/chat/completions',
+    model: 'jina-clip-v2',
+    envKey: 'JINA_API_KEY',
+    inputCostPerKToken: 0.002,
     outputCostPerKToken: 0.002
   },
   {
@@ -106,7 +114,7 @@ export async function analyzeImageWithVLM(
   const provider = getAvailableProvider();
 
   if (!provider) {
-    throw new Error('VLM 功能不可用：请设置 ZZZ_API_KEY 或 ZHIPU_API_KEY 环境变量');
+    throw new Error('VLM 功能不可用：请设置 ZZZ_API_KEY、JINA_API_KEY 或 ZHIPU_API_KEY 环境变量');
   }
 
   const apiKey = process.env[provider.envKey];
