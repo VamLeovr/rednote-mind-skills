@@ -8,6 +8,9 @@ import { logger } from './logger';
 import type { BatchNotesResult } from '../types';
 import { getFavoritesList } from './favoritesList';
 import { getNoteContent } from './noteContent';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 
 /**
  * 从收藏夹批量获取笔记内容
@@ -165,6 +168,32 @@ export async function getBatchNotesFromUrls(
         imageQuality: 75,
         maxImageSize: 1920
       });
+
+      // 保存图片到本地并更新 localPath
+      if (noteContent.images && noteContent.images.length > 0) {
+        const noteId = noteContent.noteId || `note-${i}`;
+        const outputDir = path.join(os.homedir(), 'Documents', 'Base', 'rednote-search', 'images', noteId);
+
+        if (!fs.existsSync(outputDir)) {
+          fs.mkdirSync(outputDir, { recursive: true });
+        }
+
+        for (let imgIdx = 0; imgIdx < noteContent.images.length; imgIdx++) {
+          const img = noteContent.images[imgIdx];
+          const filename = `image_${imgIdx + 1}.jpg`;
+          const filepath = path.join(outputDir, filename);
+
+          try {
+            const buffer = Buffer.from(img.base64, 'base64');
+            fs.writeFileSync(filepath, buffer);
+            img.localPath = filepath;
+            logger.debug(`   💾 图片已保存: ${filepath}`);
+          } catch (err: any) {
+            logger.debug(`   ⚠️ 图片保存失败: ${err.message}`);
+          }
+        }
+      }
+
       result.notes.push(noteContent);
       result.successCount++;
 

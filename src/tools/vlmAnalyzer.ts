@@ -1,10 +1,11 @@
 /**
  * VLM (Vision Language Model) 图片分析模块
- * 支持多个 VLM API 提供商：智增增 Qwen VL、Jina AI、智谱清言 GLM-4V
- * 用户可选择配置任意一个 API Key：ZZZ_API_KEY、JINA_API_KEY 或 ZHIPU_API_KEY
- * 优先级：智增增 > Jina > 智谱清言
+ * 支持多个 VLM API 提供商：智增增 Qwen VL、Jina AI、智谱清言 GLM-4V、MiniMax
+ * 用户可选择配置任意一个 API Key：ZZZ_API_KEY、JINA_API_KEY、ZHIPU_API_KEY 或 MINIMAX_API_KEY
+ * 优先级：MiniMax > 智增增 > Jina > 智谱清言
  */
 
+import 'dotenv/config';
 import { logger } from './logger';
 import type { VLMAnalysisResult, ImageData } from '../types';
 
@@ -22,6 +23,7 @@ interface VLMProvider {
 
 /**
  * 支持的 VLM 提供商列表（按优先级排序）
+ * 注意：MiniMax 用于纯文本对话，图片分析需要使用其他 VLM 提供商
  */
 const VLM_PROVIDERS: VLMProvider[] = [
   {
@@ -44,6 +46,37 @@ const VLM_PROVIDERS: VLMProvider[] = [
     name: '智谱清言',
     apiUrl: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
     model: 'glm-4v',
+    envKey: 'ZHIPU_API_KEY',
+    inputCostPerKToken: 0.005,
+    outputCostPerKToken: 0.005
+  }
+];
+
+/**
+ * 纯文本 LLM 提供商列表（用于内容判断、对话等）
+ * 优先级：MiniMax > 智增增 > 智谱清言
+ */
+const TEXT_LLM_PROVIDERS: VLMProvider[] = [
+  {
+    name: 'MiniMax',
+    apiUrl: 'https://api.minimax.chat/v1/text/chatcompletion_v2',
+    model: 'abab8.5-sft-01',
+    envKey: 'MINIMAX_API_KEY',
+    inputCostPerKToken: 0.001,
+    outputCostPerKToken: 0.001
+  },
+  {
+    name: '智增增',
+    apiUrl: 'https://api.zhizengzeng.com/v1/chat/completions',
+    model: 'qwen3-235b-a22b',
+    envKey: 'ZZZ_API_KEY',
+    inputCostPerKToken: 0.001,
+    outputCostPerKToken: 0.002
+  },
+  {
+    name: '智谱清言',
+    apiUrl: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+    model: 'glm-4',
     envKey: 'ZHIPU_API_KEY',
     inputCostPerKToken: 0.005,
     outputCostPerKToken: 0.005
@@ -84,6 +117,26 @@ function getAvailableProvider(): VLMProvider | null {
  */
 export function isVLMAvailable(): boolean {
   return getAvailableProvider() !== null;
+}
+
+/**
+ * 获取当前可用的文本 LLM 提供商（用于内容判断、对话等）
+ * 优先级：MiniMax > 智增增 > 智谱清言
+ */
+function getAvailableTextProvider(): VLMProvider | null {
+  for (const provider of TEXT_LLM_PROVIDERS) {
+    if (process.env[provider.envKey]) {
+      return provider;
+    }
+  }
+  return null;
+}
+
+/**
+ * 检查文本 LLM 功能是否可用
+ */
+export function isTextLLMAvailable(): boolean {
+  return getAvailableTextProvider() !== null;
 }
 
 /**
@@ -373,4 +426,99 @@ export function printVLMCostEstimate(imageCount: number): void {
   logger.info(`   输入成本: ¥${cost.inputCost.toFixed(4)}`);
   logger.info(`   输出成本: ¥${cost.outputCost.toFixed(4)}`);
   logger.info(`   总计: ¥${cost.totalCost.toFixed(4)}\n`);
+}
+
+// ============================================================================
+// 纯文本 LLM 调用（用于内容判断、总结等）
+// ============================================================================
+
+/**
+ * 使用 LLM 进行纯文本对话（不包含图片）
+ * 可用于内容质量判断、摘要生成等场景
+ *
+ * @param prompt 用户提示词
+ * @param systemPrompt 系统提示词（可选）
+ * @returns LLM 响应文本
+ */
+export async function chatWithLLM(
+  prompt: string,
+  systemPrompt?: string
+): Promise<string> {
+  const provider = getAvailableTextProvider();
+
+  if (!provider) {
+    throw new Error('LLM 功能不可用：请设置 MINIMAX_API_KEY、ZZZ_API_KEY 或 ZHIPU_API_KEY 环境变量');
+  }
+
+  const apiKey = process.env[provider.envKey];
+
+  try {
+    logger.debug(`💬 使用 ${provider.name} LLM 进行文本对话...`);
+
+    const messages: any[] = [];
+
+    if (systemPrompt) {
+      messages.push({ role: 'system', content: systemPrompt });
+    }
+
+    messages.push({ role: 'user', content: prompt });
+
+    // MiniMax 使用不同的请求格式
+    let requestBody: any;
+    if (provider.name === 'MiniMax') {
+      requestBody = {
+        model: provider.model,
+        messages,
+        max_tokens: 2048,
+        temperature: 0.7
+      };
+    } else {
+      requestBody = {
+        model: provider.model,
+        messages,
+        max_tokens: 2048,
+        stream: false
+      };
+    }
+
+    const response = await fetch(provider.apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+      throw new Error(`${provider.name} API 错误: ${data.error.message || JSON.stringify(data.error)}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(`${provider.name} API 调用失败: ${response.status} ${JSON.stringify(data)}`);
+    }
+
+    // 不同提供商的响应格式可能不同
+    let responseText = '';
+    if (provider.name === 'MiniMax') {
+      // MiniMax: data.choices[0].message.content
+      responseText = data.choices?.[0]?.message?.content || '';
+      // MiniMax 可能返回数组格式
+      if (Array.isArray(responseText)) {
+        responseText = responseText.map((t: any) => t.text || t.content || '').join('');
+      }
+    } else {
+      responseText = data.choices?.[0]?.message?.content || '';
+    }
+
+    logger.debug(`✅ LLM 对话完成 (使用 tokens: ${data.usage?.total_tokens || 'N/A'})`);
+
+    return responseText;
+
+  } catch (error: any) {
+    logger.error(`LLM 对话失败: ${error.message}`);
+    throw new Error(`LLM 对话失败: ${error.message}`);
+  }
 }

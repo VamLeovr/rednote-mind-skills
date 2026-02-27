@@ -6,7 +6,7 @@
 import type { Page } from 'playwright';
 import { logger } from './logger';
 import type { ImageData } from '../types';
-import { compressImage, type CompressionOptions } from './imageCompressor.js';
+import { compressImage, type CompressionOptions } from './imageCompressor';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';

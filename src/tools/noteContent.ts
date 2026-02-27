@@ -147,18 +147,31 @@ export async function getNoteContent(
         const el = document.querySelector(selector);
         if (!el) return 0;
         const text = el.textContent?.trim() || '0';
+        const numStr = text.replace(/,/g, '');
         // 处理 "1.2万" 这样的格式
-        if (text.includes('万')) {
-          return Math.round(parseFloat(text) * 10000);
+        if (numStr.includes('万')) {
+          return Math.round(parseFloat(numStr) * 10000);
         }
-        return parseInt(text) || 0;
+        return parseInt(numStr) || 0;
       };
 
-      likes = extractNumber('[class*="like"]') ||
-              extractNumber('[class*="liked"]');
-      collects = extractNumber('[class*="collect"]') ||
-                 extractNumber('[class*="favorite"]');
-      comments = extractNumber('[class*="comment"]');
+      likes = extractNumber('.like-wrapper .count') ||
+              extractNumber('.interact-container .like-wrapper') ||
+              extractNumber('[class*="like"] .count') ||
+              extractNumber('[class*="like-count"]') ||
+              extractNumber('[class*="interact"] [class*="like"]');
+
+      collects = extractNumber('.collect-wrapper .count') ||
+                 extractNumber('.interact-container .collect-wrapper') ||
+                 extractNumber('[class*="collect"] .count') ||
+                 extractNumber('[class*="collect-count"]') ||
+                 extractNumber('[class*="interact"] [class*="collect"]');
+
+      comments = extractNumber('.chat-wrapper .count') ||
+                 extractNumber('.interact-container .chat-wrapper') ||
+                 extractNumber('[class*="chat"] .count') ||
+                 extractNumber('[class*="comment-count"]') ||
+                 extractNumber('[class*="interact"] [class*="chat"]');
 
       // 提取发布时间
       const timeEl = document.querySelector('[class*="time"]') ||

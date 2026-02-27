@@ -56,6 +56,8 @@ export interface ImageData {
   mimeType: string;
   /** VLM 预分析结果（如果启用） */
   vlmAnalysis?: VLMAnalysisResult;
+  /** 本地文件路径（如果下载到本地） */
+  localPath?: string;
 }
 
 /**
@@ -133,6 +135,7 @@ export interface SearchResultNote {
     name: string;
     url: string;
   };
+  likes: number;
 }
 
 /**

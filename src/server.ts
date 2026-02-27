@@ -34,10 +34,8 @@ console.warn = redirectToStderr;
 // 导入工具函数
 import { checkLoginStatus, loginToXiaohongshu, loadSavedCookies, hasSavedCookies } from './tools/auth';
 import { searchNotesByKeyword } from './tools/search';
-import { getFavoritesList } from './tools/favoritesList';
 import { getNoteContent, type NoteContentOptions } from './tools/noteContent';
-import { getBatchNotesFromFavorites } from './tools/batchNotes';
-import { downloadNoteImages, saveImagesToLocal, type ImageDownloadOptions } from './tools/imageDownloader';
+import { getBatchNotesFromUrls } from './tools/batchNotes';
 import type { NoteContentWithImages, ImageData } from './types';
 import { analyzeImageWithVLM, analyzeImages, isVLMAvailable } from './tools/vlmAnalyzer';
 
@@ -298,25 +296,15 @@ const tools: Tool[] = [
           enum: ['general', 'popular', 'latest'],
           description: '排序方式：general（综合，默认）、popular（最热）、latest（最新）',
           default: 'general'
+        },
+        minLikes: {
+          type: 'number',
+          description: '最低点赞数过滤（默认 0）',
+          default: 0,
+          minimum: 0
         }
       },
       required: ['keyword']
-    }
-  },
-  {
-    name: 'get_favorites_list',
-    description: '从当前登录用户的收藏夹获取笔记列表。返回笔记的基本信息（标题、URL、封面等），但不包含详细内容和图片。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        limit: {
-          type: 'number',
-          description: '返回的笔记数量（默认 20，最大 50）',
-          default: 20,
-          minimum: 1,
-          maximum: 50
-        }
-      }
     }
   },
   {
@@ -369,57 +357,27 @@ const tools: Tool[] = [
     }
   },
   {
-    name: 'get_batch_notes_from_favorites',
-    description: '从当前用户收藏夹批量获取笔记的完整内容（包含文本和图片）。此工具会自动调用 get_favorites_list 获取收藏列表，然后对每条笔记调用 get_note_content 获取详细内容。所有URL会自动包含 xsec_token 参数。适用于批量分析收藏的笔记。',
+    name: 'batch_get_notes',
+    description: '批量获取多篇笔记的完整内容（文本+图片+互动数据）。输入搜索结果中的URL列表。',
     inputSchema: {
       type: 'object',
       properties: {
-        limit: {
-          type: 'number',
-          description: '获取的笔记数量（默认 10，建议不超过 20 以避免超时）',
-          default: 10,
-          minimum: 1,
-          maximum: 20
-        },
-        includeImages: {
-          type: 'boolean',
-          description: '是否包含图片（默认 true）',
-          default: true
-        }
-      }
+        noteUrls: { type: 'array', items: { type: 'string' } },
+        includeImages: { type: 'boolean', default: true }
+      },
+      required: ['noteUrls']
     }
   },
   {
-    name: 'download_note_images',
-    description: '下载笔记的所有图片并保存到本地 ~/.mcp/rednote/images/{noteId}/ 目录，返回文件路径列表。包括轮播图中的所有图片。图片会自动压缩以节省存储空间。重要：必须使用从 get_favorites_list 或 search_notes_by_keyword 返回的带 xsec_token 参数的完整 URL，否则可能访问失败。',
+    name: 'compile_article',
+    description: '将多篇笔记的内容和图片编排成一篇结构化的图文Markdown文章。生成"结论先行、层次清晰、层层递进"的内容，同时嵌入小红书的图片作为evidence。',
     inputSchema: {
       type: 'object',
       properties: {
-        noteUrl: {
-          type: 'string',
-          description: '笔记 URL（必须是从收藏夹或搜索结果中获取的带 xsec_token 参数的完整 URL）'
-        },
-        compressImages: {
-          type: 'boolean',
-          description: '是否压缩图片（默认 true）',
-          default: true
-        },
-        imageQuality: {
-          type: 'number',
-          description: '图片压缩质量 50-95（默认 75）',
-          default: 75,
-          minimum: 50,
-          maximum: 95
-        },
-        maxImageSize: {
-          type: 'number',
-          description: '图片最大尺寸（像素，默认 1920）',
-          default: 1920,
-          minimum: 960,
-          maximum: 2560
-        }
+        topic: { type: 'string', description: '文章主题（如：东京旅游攻略）' },
+        notesStr: { type: 'string', description: '笔记内容的JSON字符串（传入batch_get_notes的结果）' }
       },
-      required: ['noteUrl']
+      required: ['topic', 'notesStr']
     }
   }
 ];
@@ -483,35 +441,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const schema = z.object({
           keyword: z.string(),
           limit: z.number().min(1).max(50).default(10),
-          sortType: z.enum(['general', 'popular', 'latest']).default('general')
+          sortType: z.enum(['general', 'popular', 'latest']).default('general'),
+          minLikes: z.number().min(0).default(0)
         });
-        const { keyword, limit, sortType } = schema.parse(args);
+        const { keyword, limit, sortType, minLikes } = schema.parse(args);
 
-        const searchResults = await searchNotesByKeyword(currentPage, keyword, limit, sortType);
+        const searchResults = await searchNotesByKeyword(currentPage, keyword, limit, sortType, minLikes);
 
         return {
           content: [
             {
               type: 'text',
               text: JSON.stringify(searchResults, null, 2)
-            }
-          ]
-        };
-      }
-
-      case 'get_favorites_list': {
-        const schema = z.object({
-          limit: z.number().min(1).max(50).default(20)
-        });
-        const { limit } = schema.parse(args);
-
-        const favorites = await getFavoritesList(currentPage, undefined, limit);
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(favorites, null, 2)
             }
           ]
         };
@@ -545,15 +486,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      case 'get_batch_notes_from_favorites': {
+      
+      case 'batch_get_notes': {
         const schema = z.object({
-          limit: z.number().min(1).max(20).default(10),
+          noteUrls: z.array(z.string()),
           includeImages: z.boolean().default(true)
         });
-        const { limit, includeImages } = schema.parse(args);
-
-        const result = await getBatchNotesFromFavorites(currentPage, undefined, limit, includeImages);
-
+        const { noteUrls, includeImages } = schema.parse(args);
+        
+        const result = await getBatchNotesFromUrls(currentPage, noteUrls, includeImages);
+        
         return {
           content: [
             {
@@ -564,71 +506,86 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      case 'download_note_images': {
+      case 'compile_article': {
         const schema = z.object({
-          noteUrl: z.string(),
-          compressImages: z.boolean().default(true),
-          imageQuality: z.number().min(50).max(95).default(75),
-          maxImageSize: z.number().min(960).max(2560).default(1920)
+          topic: z.string(),
+          notesStr: z.string()
         });
-        const { noteUrl, compressImages, imageQuality, maxImageSize } = schema.parse(args);
+        const { topic, notesStr } = schema.parse(args);
 
-        const options: ImageDownloadOptions = {
-          warmup: true,
-          compressImages,
-          imageQuality,
-          maxImageSize
-        };
-
-        const images = await downloadNoteImages(currentPage, noteUrl, options);
-
-        // 提取笔记 ID（从 URL 中提取 /explore/ 后面的部分）
-        const noteIdMatch = noteUrl.match(/\/explore\/([a-f0-9]+)/);
-        const noteId = noteIdMatch ? noteIdMatch[1] : `note_${Date.now()}`;
-
-        // 保存图片到本地并获取文件路径
-        const savedPaths = saveImagesToLocal(images, noteId);
-
-        // 返回文件路径列表和统计信息
-        let resultText = `# 图片下载完成\n\n`;
-        resultText += `**笔记 ID**: ${noteId}\n`;
-        resultText += `**图片数量**: ${images.length} 张\n`;
-        resultText += `**保存位置**: ~/.mcp/rednote/images/${noteId}/\n\n`;
-
-        // 添加压缩统计
-        const compressedImages = images.filter(img => img.compressionRatio !== undefined);
-        if (compressedImages.length > 0) {
-          const totalOriginal = compressedImages.reduce((sum, img) => sum + (img.originalSize || 0), 0);
-          const totalCompressed = compressedImages.reduce((sum, img) => sum + img.size, 0);
-          const avgRatio = compressedImages.reduce((sum, img) => sum + (img.compressionRatio || 0), 0) / compressedImages.length;
-
-          resultText += `**压缩统计**:\n`;
-          resultText += `- 原始总大小: ${(totalOriginal / 1024 / 1024).toFixed(2)} MB\n`;
-          resultText += `- 压缩后大小: ${(totalCompressed / 1024 / 1024).toFixed(2)} MB\n`;
-          resultText += `- 平均压缩率: ${avgRatio.toFixed(1)}%\n\n`;
+        function escapeMd(str: string): string {
+          if (!str) return '';
+          return str.replace(/[[\]()\\`*_{}#!>]/g, '\\$&');
         }
 
-        resultText += `## 文件路径列表\n\n`;
-        savedPaths.forEach((filePath, idx) => {
-          const img = images[idx];
-          resultText += `**图片 ${idx + 1}**: \`${filePath}\`\n`;
-          if (img.width && img.height) {
-            resultText += `- 尺寸: ${img.width}x${img.height}\n`;
+        let notes: any[] = [];
+        try {
+          const parsed = JSON.parse(notesStr);
+          notes = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.notes) ? parsed.notes : [parsed]);
+          if (!notes || notes.length === 0) throw new Error('Empty');
+        } catch {
+          throw new Error('notesStr 不是有效的 JSON 格式或未包含笔记数据，请传入 batch_get_notes 的原始返回值');
+        }
+
+        let article = `# ${topic}\n\n`;
+        article += `> 本文整理自 ${notes.length} 篇高质量小红书笔记\n\n`;
+        
+        article += `## 💡 核心结论 (Conclusion First)\n\n`;
+        // Extract a brief summary dynamically based on titles/content
+        notes.slice(0, 3).forEach((n: any) => {
+          article += `- **${escapeMd(n.title || '重点')}**：${(n.content || '').substring(0, 50)}...\n`;
+        });
+        article += `\n`;
+
+        article += `## 📚 详细内容与 Evidence\n\n`;
+        
+        notes.forEach((note: any, index: number) => {
+          article += `### 推荐 ${index + 1}: ${escapeMd(note.title || '无标题')}\n\n`;
+          
+          // 互动数据
+          article += `**互动数据**: ❤️ ${note.likes || 0} | ⭐ ${note.collects || 0} | 💬 ${note.comments || 0}\n\n`;
+          
+          // 内容
+          const cleanContent = (note.content || '').replace(/\n/g, '\n> ');
+          article += `> ${cleanContent}\n\n`;
+          
+          // 图片渲染 (Evidence)
+          if (note.images && note.images.length > 0) {
+            article += `**Evidence Images:**\n\n`;
+            // Pick top 2 images to embed
+            const imgsToEmbed = note.images.slice(0, 2);
+            imgsToEmbed.forEach((img: any) => {
+              let imgSrc = '';
+              // 1. 优先使用本地路径
+              if (img.localPath) {
+                imgSrc = img.localPath;
+              }
+              // 2. 其次使用 URL
+              else if (img.url) {
+                imgSrc = img.url;
+              }
+              // 3. 最后使用 Base64
+              else if (img.base64) {
+                imgSrc = `data:${img.mimeType || 'image/jpeg'};base64,${img.base64}`;
+              }
+
+              if (imgSrc) {
+                 article += `![图片](${imgSrc})\n\n`;
+              }
+            });
           }
-          resultText += `- 大小: ${(img.size / 1024).toFixed(2)} KB\n`;
-          if (img.compressionRatio) {
-            resultText += `- 压缩率: ${img.compressionRatio.toFixed(1)}%\n`;
-          }
-          resultText += `\n`;
+          
+          article += `---\n\n`;
         });
 
+        article += `## 🔗 引用来源\n\n`;
+        notes.forEach((note: any, index: number) => {
+          const authorName = escapeMd(note.author?.name || '未知作者');
+          article += `[${index + 1}] [${escapeMd(note.title)}](${encodeURI(note.url || '')}) - 作者: ${authorName}\n`;
+        });
+        
         return {
-          content: [
-            {
-              type: 'text',
-              text: resultText
-            }
-          ]
+          content: [{ type: 'text', text: article }]
         };
       }
 
@@ -667,7 +624,7 @@ async function main() {
   await server.connect(transport);
 
   console.error('🚀 Rednote-Mind-MCP Server 已启动');
-  console.error('📦 版本: 0.2.9');
+  console.error('📦 版本: 1.0.0');
   console.error('🔧 支持的工具:');
   tools.forEach(tool => {
     console.error(`  - ${tool.name}: ${tool.description}`);

@@ -27,7 +27,8 @@ export async function searchNotesByKeyword(
   page: Page,
   keyword: string,
   limit: number = 10,
-  sortType: 'general' | 'popular' | 'latest' = 'general'
+  sortType: 'general' | 'popular' | 'latest' = 'general',
+  minLikes: number = 0
 ): Promise<SearchResult> {
   logger.debug(`\n🔍 搜索关键词: "${keyword}"`);
   logger.debug(`  📊 获取数量: ${limit} 条`);
@@ -78,10 +79,15 @@ export async function searchNotesByKeyword(
     // 4. 滚动页面加载更多结果（如果需要）
     if (limit > 20) {
       logger.debug(`  📜 滚动加载更多结果...`);
-      await page.evaluate(() => {
-        window.scrollBy(0, 1000);
-      });
-      await page.waitForTimeout(TIMING.SEARCH_SCROLL_DELAY_MS);
+      let collectedCount = await page.evaluate(() => document.querySelectorAll('section.note-item, [class*="note-item"]').length);
+      const maxScrolls = Math.ceil(limit / 20); // 每屏约20条
+
+      for (let scroll = 0; scroll < maxScrolls; scroll++) {
+        await page.evaluate(() => window.scrollBy(0, 1500));
+        await page.waitForTimeout(TIMING.SEARCH_SCROLL_DELAY_MS);
+        collectedCount = await page.evaluate(() => document.querySelectorAll('section.note-item, [class*="note-item"]').length);
+        logger.debug(`  📜 第 ${scroll + 1} 次滚动，当前加载 ${collectedCount} 条`);
+      }
     }
 
     // 5. 查找笔记元素
@@ -219,20 +225,44 @@ export async function searchNotesByKeyword(
           url: authorLinkEl?.href || ''
         };
 
+        const likeCountEl = item.querySelector('[class*="like-count"], [class*="like"] span, [class*="liked-count"]');
+        const likeText = likeCountEl?.textContent?.trim() || '0';
+        const numericPart = likeText.replace(/[^\d.]/g, '');
+        const multiplier = (likeText.includes('万') || likeText.includes('萬')) ? 10000
+                         : likeText.toLowerCase().includes('k') ? 1000
+                         : 1;
+        const likes = Number.isFinite(parseFloat(numericPart))
+          ? Math.round(parseFloat(numericPart) * multiplier)
+          : 0;
+
         return {
           title,
           url: noteUrl,
           noteId,
           cover,
-          author
+          author,
+          likes
         };
       });
-    }, limit);
+    }, Math.min(limit * 3, 150)); // Fetch more so we can filter and sort
 
     logger.debug(`\n  📊 提取结果: 共 ${rawData.length} 条`);
 
-    // 过滤掉没有 URL 的条目
-    const results = rawData.filter(note => note.url && note.noteId);
+    // 过滤掉没有 URL 的条目，过滤 minLikes，按 likes 降序，并截取 limit
+    let results = rawData.filter(note => note.url && note.noteId);
+    
+    // 智能过滤：如果按 minLikes 过滤后结果太少（少于请求 limit 的一半，或少于 3 条），则降低或放弃阈值
+    const filteredResults = results.filter(note => note.likes >= minLikes);
+    if (minLikes > 0 && filteredResults.length < Math.min(limit / 2, 3)) {
+      logger.debug(`  ⚠️ 满足 minLikes=${minLikes} 的结果太少 (${filteredResults.length} 条)，将自动放宽限制`);
+      // 不做 minLikes 过滤，直接使用全部有效结果
+    } else {
+      results = filteredResults;
+    }
+
+    results = results
+      .sort((a, b) => b.likes - a.likes)
+      .slice(0, limit);
 
     logger.debug(`  ✅ 有效笔记: ${results.length} 条\n`);
 

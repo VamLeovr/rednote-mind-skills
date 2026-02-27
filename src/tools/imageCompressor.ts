@@ -4,7 +4,7 @@
  */
 
 import sharp from 'sharp';
-import { logger } from './logger.js';
+import { logger } from './logger';
 
 /**
  * 压缩配置选项

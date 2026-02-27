@@ -1,7 +1,7 @@
 {
-  "name": "rednote-mind-mcp",
-  "version": "0.3.0",
-  "description": "Rednote-Mind-MCP - 小红书 MCP 服务器，为 AI 客户端提供收藏夹、搜索和内容获取能力",
+  "name": "rednote-search-mcp",
+  "version": "1.0.0",
+  "description": "小红书文章合成及搜索 MCP，专注搜索高赞笔记并排版出图文攻略",
   "main": "dist/index.js",
   "bin": {
     "rednote-mind-mcp": "dist/server.js",
@@ -55,6 +55,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.9.0",
+    "dotenv": "^17.3.1",
     "playwright": "^1.42.1",
     "sharp": "^0.34.4",
     "winston": "^3.17.0",
